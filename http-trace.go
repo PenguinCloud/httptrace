@@ -39,7 +39,7 @@ type connInfo struct {
 
 type httptracer interface {
 	convertJSON(string) []byte
-	getHttpTrace() (*httptrace.ClientTrace, *connInfo)
+	getHttpTrace() *httptrace.ClientTrace
 	findAvg() string
 	writeJSON([]byte)
 }
@@ -57,9 +57,10 @@ func main() {
 	cli := http.Client{}
 	var tome []byte
 	req, _ := http.NewRequest("GET", t.h.hostPort, bytes.NewBuffer(tome))
-	trace, tc := t.i.getHttpTrace()
-	t.c = *tc
-	req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
+	//trace, tc := t.i.getHttpTrace()
+	//t.c = *tc
+	//req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
+	req = req.WithContext(httptrace.WithClientTrace(req.Context(), t.i.getHttpTrace()))
 	_, _ = cli.Do(req)
 	jstring := t.i.findAvg()
 	bstring := t.i.convertJSON(jstring)
@@ -69,7 +70,7 @@ func main() {
 
 func getFlags() (h hostInfo) {
 	h.host = *flag.String("host", "127.0.0.1", "The target host")
-	h.port = *flag.String("port", "80", "The target port")
+	h.port = *flag.String("port", "8000", "The target port")
 	h.tls = *flag.Bool("tls", false, "Use TLS")
 	var joiner []string
 	joiner = append(joiner, h.host)
@@ -91,7 +92,8 @@ func (t totalInfo) writeJSON(js []byte) (err error) {
 	return
 }
 
-func (t totalInfo) getHttpTrace() (*httptrace.ClientTrace, *connInfo) {
+// func (t totalInfo) getHttpTrace() (*httptrace.ClientTrace, *connoInf) {
+func (t totalInfo) getHttpTrace() *httptrace.ClientTrace {
 	c := t.c
 	trace := &httptrace.ClientTrace{
 		GetConn: func(hostPort string) {
@@ -153,7 +155,7 @@ func (t totalInfo) getHttpTrace() (*httptrace.ClientTrace, *connInfo) {
 		},
 	}
 
-	return trace, &t.c
+	return trace
 
 }
 
