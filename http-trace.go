@@ -51,7 +51,8 @@ type totalInfo struct {
 	i        httptracer
 }
 
-func (t totalInfo) main() {
+func main() {
+	var t totalInfo
 	t.h = getFlags()
 	cli := http.Client{}
 	var tome []byte
