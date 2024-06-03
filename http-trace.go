@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"crypto/tls"
 	"flag"
 	"fmt"
@@ -30,11 +29,11 @@ type connInfo struct {
 	connectEnd        time.Time
 	tlsHandShakeStart time.Time
 	tlsHandShakeEnd   time.Time
-	avgGotConn        []int64
-	avgConnect        []int64
-	avgDns            []int64
-	avgTlsHandShake   []int64
-	avgGotCon         []int64
+	avgGotConn        []float64
+	avgConnect        []float64
+	avgDns            []float64
+	avgTlsHandShake   []float64
+	avgGotCon         []float64
 }
 
 type httptracer interface {
@@ -51,24 +50,8 @@ type totalInfo struct {
 	i        httptracer
 }
 
-func main() {
-	var t totalInfo
-	t.h = getFlags()
-	cli := http.Client{}
-	var tome []byte
-	req, _ := http.NewRequest("GET", t.h.hostPort, bytes.NewBuffer(tome))
-	//trace, tc := t.i.getHttpTrace()
-	//t.c = *tc
-	//req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
-	req = req.WithContext(httptrace.WithClientTrace(req.Context(), t.i.getHttpTrace()))
-	_, _ = cli.Do(req)
-	jstring := t.i.findAvg()
-	bstring := t.i.convertJSON(jstring)
-	t.i.writeJSON(bstring)
-	return
-}
-
 func getFlags() (h hostInfo) {
+	log.Println("Checking for flags...")
 	h.host = *flag.String("host", "127.0.0.1", "The target host")
 	h.port = *flag.String("port", "8000", "The target port")
 	h.tls = *flag.Bool("tls", false, "Use TLS")
@@ -95,6 +78,7 @@ func (t totalInfo) writeJSON(js []byte) (err error) {
 // func (t totalInfo) getHttpTrace() (*httptrace.ClientTrace, *connoInf) {
 func (t totalInfo) getHttpTrace() *httptrace.ClientTrace {
 	c := t.c
+	log.Println("Beginning Trace!")
 	trace := &httptrace.ClientTrace{
 		GetConn: func(hostPort string) {
 			c.connStart = time.Now()
@@ -105,7 +89,7 @@ func (t totalInfo) getHttpTrace() *httptrace.ClientTrace {
 			if info.Reused {
 				log.Println("connection reused")
 			} else {
-				c.avgGotConn = append(c.avgGotConn, c.connEnd.Sub(c.connStart).Microseconds())
+				c.avgGotConn = append(c.avgGotConn, float64(c.connEnd.Sub(c.connStart).Microseconds()))
 
 			}
 
@@ -120,7 +104,7 @@ func (t totalInfo) getHttpTrace() *httptrace.ClientTrace {
 				log.Println("error at ConnectDone", err)
 
 			} else {
-				c.avgConnect = append(c.avgConnect, c.connectEnd.Sub(c.connectStart).Microseconds())
+				c.avgConnect = append(c.avgConnect, float64(c.connectEnd.Sub(c.connectStart).Microseconds()))
 			}
 		},
 		DNSStart: func(info httptrace.DNSStartInfo) {
@@ -128,7 +112,7 @@ func (t totalInfo) getHttpTrace() *httptrace.ClientTrace {
 		},
 		DNSDone: func(info httptrace.DNSDoneInfo) {
 			c.dnsEnd = time.Now()
-			c.avgDns = append(c.avgDns, c.dnsEnd.Sub(c.dnsStart).Microseconds())
+			c.avgDns = append(c.avgDns, float64(c.dnsEnd.Sub(c.dnsStart).Microseconds()))
 
 		},
 		TLSHandshakeStart: func() {
@@ -140,7 +124,7 @@ func (t totalInfo) getHttpTrace() *httptrace.ClientTrace {
 
 			} else {
 				c.tlsHandShakeEnd = time.Now()
-				c.avgTlsHandShake = append(c.avgTlsHandShake, c.tlsHandShakeEnd.Sub(c.tlsHandShakeStart).Microseconds())
+				c.avgTlsHandShake = append(c.avgTlsHandShake, float64(c.tlsHandShakeEnd.Sub(c.tlsHandShakeStart).Microseconds()))
 
 			}
 
@@ -164,7 +148,7 @@ func (t totalInfo) findAvg() string {
 	var js = "{"
 
 	var (
-		gotConn, connect, dns, tlsHandshake int64
+		gotConn, connect, dns, tlsHandshake float64
 	)
 	for _, v := range t.c.avgGotConn {
 		gotConn += v
@@ -187,4 +171,25 @@ func (t totalInfo) findAvg() string {
 	js = js + fmt.Sprintf(`"AVG-TLS-HS": "%f",`, float64(tlsHandshake)/float64(len(t.c.avgTlsHandShake)))
 	js = js + "}"
 	return js
+}
+
+func main() {
+	var t totalInfo
+	t.h = getFlags()
+	cli := http.Client{}
+	//var tome []byte
+	url := "http://" + t.h.hostPort
+	req, _ := http.NewRequest("GET", url, nil)
+	//trace, tc := t.i.getHttpTrace()
+	//t.c = *tc
+	//req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
+	log.Println("Inializing Tracing Procedure... ")
+	trace := t.i.getHttpTrace()
+	log.Println("Inializing call... ")
+	req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
+	_, _ = cli.Do(req)
+	jstring := t.i.findAvg()
+	bstring := t.i.convertJSON(jstring)
+	t.i.writeJSON(bstring)
+	return
 }
