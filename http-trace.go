@@ -1,16 +1,19 @@
 package main
 
+// https://github.com/gocolly/colly/blob/master/http_trace.go
 import (
 	"crypto/tls"
+	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/valyala/fastjson"
 	"log"
 	"net/http"
 	"net/http/httptrace"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/valyala/fastjson"
 )
 
 type hostInfo struct {
@@ -33,12 +36,22 @@ type connInfo struct {
 	avgConnect        []float64
 	avgDns            []float64
 	avgTlsHandShake   []float64
-	avgGotCon         []float64
+	//avgGotCon         []float64
 }
+
+type jstruct struct {
+	host string `json:"host"`
+	port string `json:"port"`
+	avgEST string `json:"avgEST"`
+	avgCONN string `json:"avgCONN"`
+	avgDNS string `json:"avgDns"`
+	avgTLSHS string `json: "avgTLSHS"`
+}
+
+var t totalInfo
 
 type httptracer interface {
 	convertJSON(string) []byte
-	getHttpTrace() *httptrace.ClientTrace
 	findAvg() string
 	writeJSON([]byte)
 }
@@ -46,11 +59,12 @@ type httptracer interface {
 type totalInfo struct {
 	h        hostInfo
 	c        connInfo
-	response *http.Response
 	i        httptracer
+	j 	     jstruct
 }
 
-func getFlags() (h hostInfo) {
+func getFlags() () {
+	var h = t.h
 	log.Println("Checking for flags...")
 	h.host = *flag.String("host", "127.0.0.1", "The target host")
 	h.port = *flag.String("port", "8000", "The target port")
@@ -63,68 +77,68 @@ func getFlags() (h hostInfo) {
 	return
 }
 
-func (t totalInfo) convertJSON(jstring string) []byte {
-	var js fastjson.Parser
-	w, _ := js.Parse(jstring)
-	wf := w.MarshalTo(w.GetStringBytes())
-	return wf
+func convertJSON(jstring string) []byte {
+	w, _ := fastjson.Parse(jstring)
+	var jsonMap map[string]interface{}
+	json.Unmarshal([]byte(jstring ), &jsonMap)
+	return jsonMap
 }
 
-func (t totalInfo) writeJSON(js []byte) (err error) {
+func writeJSON(js []byte) (err error) {
 	err = os.WriteFile(fmt.Sprintf("httptrace-%s.json", t.h.host), js, 0600)
 	return
 }
 
 // func (t totalInfo) getHttpTrace() (*httptrace.ClientTrace, *connoInf) {
-func (t totalInfo) getHttpTrace() *httptrace.ClientTrace {
-	c := t.c
+func getHttpTrace() *httptrace.ClientTrace {
+	var t totalInfo
 	log.Println("Beginning Trace!")
 	trace := &httptrace.ClientTrace{
 		GetConn: func(hostPort string) {
-			c.connStart = time.Now()
+			t.c.connStart = time.Now()
 		},
 		GotConn: func(info httptrace.GotConnInfo) {
-			c.connEnd = time.Now()
+			t.c.connEnd = time.Now()
 
 			if info.Reused {
 				log.Println("connection reused")
 			} else {
-				c.avgGotConn = append(c.avgGotConn, float64(c.connEnd.Sub(c.connStart).Microseconds()))
+				t.c.avgGotConn = append(t.c.avgGotConn, float64(t.c.connEnd.Sub(t.c.connStart).Microseconds()))
 
 			}
 
 		},
 		ConnectStart: func(network, addr string) {
-			c.connectStart = time.Now()
+			t.c.connectStart = time.Now()
 
 		},
 		ConnectDone: func(network, addr string, err error) {
-			c.connectEnd = time.Now()
+			t.c.connectEnd = time.Now()
 			if err != nil {
 				log.Println("error at ConnectDone", err)
 
 			} else {
-				c.avgConnect = append(c.avgConnect, float64(c.connectEnd.Sub(c.connectStart).Microseconds()))
+				t.c.avgConnect = append(t.c.avgConnect, float64(t.c.connectEnd.Sub(t.c.connectStart).Microseconds()))
 			}
 		},
 		DNSStart: func(info httptrace.DNSStartInfo) {
-			c.dnsStart = time.Now()
+			t.c.dnsStart = time.Now()
 		},
 		DNSDone: func(info httptrace.DNSDoneInfo) {
-			c.dnsEnd = time.Now()
-			c.avgDns = append(c.avgDns, float64(c.dnsEnd.Sub(c.dnsStart).Microseconds()))
+			t.c.dnsEnd = time.Now()
+			t.c.avgDns = append(t.c.avgDns, float64(t.c.dnsEnd.Sub(t.c.dnsStart).Microseconds()))
 
 		},
 		TLSHandshakeStart: func() {
-			c.tlsHandShakeStart = time.Now()
+			t.c.tlsHandShakeStart = time.Now()
 		},
 		TLSHandshakeDone: func(state tls.ConnectionState, err error) {
 			if err != nil {
 				log.Println("tls error", err)
 
 			} else {
-				c.tlsHandShakeEnd = time.Now()
-				c.avgTlsHandShake = append(c.avgTlsHandShake, float64(c.tlsHandShakeEnd.Sub(c.tlsHandShakeStart).Microseconds()))
+				t.c.tlsHandShakeEnd = time.Now()
+				t.c.avgTlsHandShake = append(t.c.avgTlsHandShake, float64(t.c.tlsHandShakeEnd.Sub(t.c.tlsHandShakeStart).Microseconds()))
 
 			}
 
@@ -144,7 +158,7 @@ func (t totalInfo) getHttpTrace() *httptrace.ClientTrace {
 }
 
 // finding average of each operation
-func (t totalInfo) findAvg() string {
+func findAvg() string {
 	var js = "{"
 
 	var (
@@ -153,29 +167,28 @@ func (t totalInfo) findAvg() string {
 	for _, v := range t.c.avgGotConn {
 		gotConn += v
 	}
-	js = js + fmt.Sprintf(`"AVG-EST": "%f",`, float64(gotConn)/float64(len(t.c.avgGotConn)))
+	t.j.avgCONN = float64(gotConn)/float64(len(t.c.avgGotConn)))
 
 	for _, v := range t.c.avgConnect {
 		connect += v
 	}
-	js = js + fmt.Sprintf(`"AVG-CONN": "%f",`, float64(connect)/float64(len(t.c.avgConnect)))
+	js = js + fmt.Sprintf(`"avgCONN": "%f",`, float64(connect)/float64(len(t.c.avgConnect)))
 
 	for _, v := range t.c.avgDns {
 		dns += v
 	}
-	js = js + fmt.Sprintf(`"AVG-DNS": "%f",`, float64(dns)/float64(len(t.c.avgDns)))
+	js = js + fmt.Sprintf(`"avgDNS": "%f",`, float64(dns)/float64(len(t.c.avgDns)))
 
 	for _, v := range t.c.avgTlsHandShake {
 		tlsHandshake += v
 	}
-	js = js + fmt.Sprintf(`"AVG-TLS-HS": "%f",`, float64(tlsHandshake)/float64(len(t.c.avgTlsHandShake)))
+	js = js + fmt.Sprintf(`"avgTLSHS": "%f",`, float64(tlsHandshake)/float64(len(t.c.avgTlsHandShake)))
 	js = js + "}"
 	return js
 }
 
 func main() {
-	var t totalInfo
-	t.h = getFlags()
+	getFlags()
 	cli := http.Client{}
 	//var tome []byte
 	url := "http://" + t.h.hostPort
@@ -184,12 +197,11 @@ func main() {
 	//t.c = *tc
 	//req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
 	log.Println("Inializing Tracing Procedure... ")
-	trace := t.i.getHttpTrace()
+	trace := getHttpTrace()
 	log.Println("Inializing call... ")
 	req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
 	_, _ = cli.Do(req)
-	jstring := t.i.findAvg()
-	bstring := t.i.convertJSON(jstring)
-	t.i.writeJSON(bstring)
-	return
+	jstring := findAvg()
+	bstring := convertJSON(jstring)
+	writeJSON(bstring)
 }
